@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>IDE Fixed Delete + Run + Save</title>
+<style>
+:root{--bg:#1e1e2f;--panel:#2c2c3c;--muted:#444466;--accent:#4fc3f7;--text:#f0f0f0}
+body{margin:0;height:100vh;display:flex;flex-direction:column;font-family:sans-serif;background:var(--bg);color:var(--text)}
+header{background:var(--panel);padding:8px;display:flex;gap:8px}
+header button{background:var(--accent);border:0;padding:6px 10px;cursor:pointer;color:#000;font-weight:700;border-radius:6px}
+.main{flex:1;display:flex;overflow:hidden}
+
+.sidebar {
+  width: 200px;
+  background: var(--panel);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  transition: width 0.3s ease;
+}
+
+.sidebar.collapsed {
+  width: 0;
+  padding: 0;         /* 🔧 remove padding when collapsed */
+  overflow: hidden;   /* 🔧 hide content */
+}
+
+.file-list button{background:var(--muted);border:0;padding:6px;color:var(--text);text-align:left;border-radius:6px;cursor:pointer;margin-bottom:4px;width:100%}
+.file-list button:hover{background:var(--accent);color:#000}
+.editor-area{flex:1;display:flex;flex-direction:column}
+.tabs{display:flex;gap:6px;padding:6px;background:#242436;overflow-x:auto}
+.tabs button{background:#242436;border:0;padding:6px 10px;color:var(--text);cursor:pointer;border-radius:6px}
+.tabs button.active{background:var(--accent);color:#000}
+textarea{flex:1;width:100%;padding:10px;font-family:monospace;font-size:14px;background:#12121a;color:var(--text);border:0;outline:none;resize:none}
+iframe{flex:1;border:0;display:none}
+.add-area{display:flex;gap:4px}
+.add-area input{flex:1;padding:6px;background:#141423;color:var(--text);border:0;border-radius:6px}
+.add-area button{padding:6px;border:0;background:var(--accent);color:#000;border-radius:6px;cursor:pointer}
+</style>
+</head>
+<body>
+
+<header>
+  <button id="runBtn">Run</button>
+  <button id="editBtn" style="display:none">Edit</button>
+  <button id="saveBtn">Save</button>
+  <button id="shareBtn">Share</button>
+  <button id="deleteFileBtn">Delete</button>
+  <button id="toggleSidebar">☰</button>
+</header>
+
+<div class="main">
+  <aside class="sidebar" id="sidebar">
+    <div class="add-area">
+      <input id="newFilename" placeholder="new-file.html"/>
+      <button id="createFileBtn">+</button>
+    </div>
+    <div class="file-list" id="fileList"></div>
+    <button id="importBtn">Import</button>
+    <input type="file" id="fileInput" multiple style="display:none"/>
+  </aside>
+
+  <section class="editor-area">
+    <div class="tabs" id="tabs"></div>
+    <textarea id="editor" spellcheck="false"></textarea>
+    <iframe id="preview"></iframe>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+let files={},currentFile=null;
+// Load from localStorage if available
+if (localStorage.ideFiles) {
+  try {
+    files = JSON.parse(localStorage.ideFiles);
+    currentFile = Object.keys(files)[0] || null;
+  } catch(e) {
+    files = {};
+  }
+}
+const editor=document.getElementById("editor"),
+      preview=document.getElementById("preview"),
+      tabs=document.getElementById("tabs"),
+      fileList=document.getElementById("fileList"),
+      newFileInput=document.getElementById("newFilename");
+
+function defaultContent(name){
+  if(name.endsWith(".html")) return "<!doctype html><html><head><meta charset='utf-8'><title>"+name+"</title></head><body><h1>"+name+"</h1></body></html>";
+  if(name.endsWith(".css")) return "body{font-family:sans-serif}";
+  if(name.endsWith(".js")) return "console.log('"+name+" loaded')";
+  return "";
+}
+
+function render(){
+  tabs.innerHTML=""; fileList.innerHTML="";
+  Object.keys(files).forEach(f=>{
+    let t=document.createElement("button");
+    t.textContent=f; t.className=f===currentFile?"active":"";
+    t.onclick=()=>switchFile(f);
+    tabs.appendChild(t);
+    let b=document.createElement("button");
+    b.textContent=f; b.onclick=()=>switchFile(f);
+    fileList.appendChild(b);
+  });
+}
+
+function switchFile(name){
+  if(currentFile) files[currentFile]=editor.value;
+  currentFile=name; editor.value=files[name]||"";
+ localStorage.ideFiles = JSON.stringify(files); 
+  render();
+  
+}
+
+function createFile(name){
+  if(!name.trim()) return;
+  files[name]=defaultContent(name);
+  currentFile=name; render(); editor.value=files[name];
+  localStorage.ideFiles = JSON.stringify(files);
+}
+
+document.getElementById("createFileBtn").onclick=()=>{createFile(newFileInput.value); newFileInput.value="";};
+document.getElementById("fileInput").onchange=e=>{
+  [...e.target.files].forEach(f=>{
+    let r=new FileReader();
+    r.onload=ev=>{files[f.name]=ev.target.result;currentFile=f.name;render();editor.value=files[f.name];};
+    r.readAsText(f);
+  });
+};
+document.getElementById("importBtn").onclick=()=>document.getElementById("fileInput").click();
+
+document.getElementById("deleteFileBtn").onclick=()=>{
+  if(!currentFile) return;
+  if(!confirm("Delete "+currentFile+"?")) return;
+  delete files[currentFile];
+    localStorage.ideFiles = JSON.stringify(files);
+  
+ 
+  let keys=Object.keys(files);
+  if(keys.length>0){
+    currentFile=keys[0];
+    editor.value=files[currentFile];
+  } else {
+    currentFile=null;
+    editor.value="";
+  }
+  render();
+
+  // 🔧 Added: make sure editor switches after delete
+  if (currentFile && !files[currentFile]) {
+    let keys = Object.keys(files);
+    if (keys.length > 0) {
+      currentFile = keys[0];
+      editor.value = files[currentFile];
+    } else {
+      currentFile = null;
+      editor.value = "";
+    }
+    render();
+  }
+};
+
+
+
+
+document.getElementById("shareBtn").onclick = async () => {
+  if(currentFile) files[currentFile]=editor.value;
+  localStorage.ideFiles = JSON.stringify(files);
+
+  let zip = new JSZip();
+  for(let f in files) zip.file(f, files[f]);
+  let blob = await zip.generateAsync({type:"blob"});
+
+  // Try native Web Share API
+  if (navigator.canShare && navigator.canShare({ files: [new File([blob], "project.zip", { type: "application/zip" })] })) {
+    let file = new File([blob], "project.zip", { type: "application/zip" });
+    await navigator.share({
+      title: "My Project",
+      text: "Here’s my project!",
+      files: [file]
+    });
+  } else {
+    // Fallback: download ZIP
+    let a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="project.zip";
+    a.click();
+  }
+};
+// --- RUN ---
+document.getElementById("runBtn").onclick=()=>{
+  if(currentFile) files[currentFile]=editor.value;
+
+  // 🔧 Added: run current HTML if possible
+  let htmlName=null;
+  if(currentFile && currentFile.endsWith(".html")){
+    htmlName=currentFile;
+  } else if(files["index.html"]) {
+    htmlName="index.html";
+  } else {
+    htmlName=Object.keys(files).find(f=>f.endsWith(".html")) || null;
+  }
+
+  if(!htmlName){
+    preview.srcdoc="<pre>"+(files[currentFile]||"")+"</pre>";
+  } else {
+    preview.srcdoc=files[htmlName];
+  }
+
+  editor.style.display="none";preview.style.display="block";
+  document.getElementById("runBtn").style.display="none";
+  document.getElementById("editBtn").style.display="inline-block";
+};
+
+document.getElementById("editBtn").onclick=()=>{
+  preview.style.display="none";editor.style.display="block";
+  document.getElementById("runBtn").style.display="inline-block";
+  document.getElementById("editBtn").style.display="none";
+};
+
+document.getElementById("saveBtn").onclick=async()=>{
+  if(currentFile) files[currentFile]=editor.value; // 🔧 Added:
+    localStorage.ideFiles = JSON.stringify(files);
+  
+  
+  if(Object.keys(files).length===1){
+    let blob=new Blob([files[currentFile]],{type:"text/plain"});
+    let a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=currentFile;a.click();
+  }else{
+    let zip=new JSZip();
+    for(let f in files) zip.file(f,files[f]);
+    let blob=await zip.generateAsync({type:"blob"});
+    let a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="project.zip";a.click();
+  }
+};
+
+document.getElementById("toggleSidebar").onclick = () => {
+  document.getElementById("sidebar").classList.toggle("collapsed");
+};
+// init
+// init
+if (!currentFile) {
+  createFile("index.html");
+} else {
+  render();
+  editor.value = files[currentFile];
+}
+</script>
+</body>
+</html>
